@@ -11,7 +11,9 @@
     - [Install the default configuration files](#install-the-default-configuration-files)
     - [Install Meteor software](#install-meteor-software)
     - [Setup Nginx](#setup-nginx)
+    - [Setup Database](#setup-database)
     - [Setup RamFS](#setup-ramfs)
+    - [Setup ISS reception and decoding (SSTV)](#setup-iss-reception-and-decoding-sstv)
     - [Cron the scheduling job](#cron-the-scheduling-job)
     - [Set your Twitter credentials](#set-your-twitter-credentials)
 
@@ -60,7 +62,14 @@ sudo apt install -yq predict \
                      python3-pip \
                      imagemagick \
                      libxft-dev \
-                     libxft2
+                     libxft2 \
+                     libjpeg9 \
+                     libjpeg9-dev \
+                     socat \
+                     php7.2-fpm \
+                     php7.2-sqlite \
+                     sqlite3 \
+                     libgfortran5
 ``` 
 
 ```
@@ -145,6 +154,12 @@ sudo chmod 775 /var/www/wx
 sudo cp templates/index.html /var/www/wx/index.html
 sudo cp templates/logo-small.png /var/www/wx/logo-small.png
 sudo systemctl restart nginx
+sudo cp -rp templates/webpanel/* /var/www/wx/
+```
+
+### Setup Database
+```
+sqlite3 "panel.db" < "templates/webpanel_schema.sql"
 ```
 
 ### Setup RamFS
@@ -153,6 +168,16 @@ sudo mkdir -p /var/ramfs
 cat templates/fstab | sudo tee -a /etc/fstab > /dev/null
 sudo mount -a
 sudo chmod 777 /var/ramfs
+```
+
+### Setup ISS reception and decoding (SSTV)
+```
+wget -qr https://github.com/reynico/pd120_decoder/archive/master.zip -O /tmp/master.zip
+cd /tmp
+unzip master.zip
+cd pd120_decoder-master/pd120_decoder/
+pip3 install --user -r requirements.txt
+cp demod.py utils.py "/home/pi/raspberry-noaa/"
 ```
 
 ### Cron the scheduling job
