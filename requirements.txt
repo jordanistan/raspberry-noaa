@@ -1,4 +1,4 @@
-idna==2.8
+idna==3.7
 numpy==1.22.2
 Pillow==9.2.0
 tweepy==3.8.0
