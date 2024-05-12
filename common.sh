@@ -25,7 +25,6 @@ log() {
 
 ## current date and folder structure
 START_DATE=$(date '+%d-%m-%Y %H:%M')
-FOLDER_DATE="$(date +%Y)/$(date +%m)/$(date +%d)"
 
 ## sane checks
 if [ ! -d "${NOAA_HOME}" ]; then
@@ -36,21 +35,16 @@ if [ ! -d "${NOAA_OUTPUT}/audio/" ]; then
 	mkdir -m 775 -p "${NOAA_OUTPUT}/audio/"
 fi
 
-
-if [ ! -d "${METEOR_OUTPUT}" ]; then
-	mkdir -m 775 -p "${METEOR_OUTPUT}"
-fi
-
 if [ ! -d "${METEOR_OUTPUT}/audio/" ]; then
 	mkdir -m 775 -p "${METEOR_OUTPUT}/audio/"
 fi
 
-if [ ! -d "${NOAA_AUDIO}/audio/" ]; then
-	mkdir -m 775 -p "${NOAA_AUDIO}/audio/"
+if [ ! -d "${RAMFS_AUDIO}/audio/" ]; then
+	mkdir -m 775 -p "${RAMFS_AUDIO}/audio/"
 fi
 
-if [ ! -d "${NOAA_OUTPUT}/image/" ]; then
-	mkdir -m 775 -p "${NOAA_OUTPUT}/image/"
+if [ ! -d "${NOAA_OUTPUT}/images/thumb" ]; then
+	mkdir -m 775 -p "${NOAA_OUTPUT}/images/thumb"
 fi
 
 if [ ! -d "${NOAA_HOME}/map/" ]; then
@@ -59,8 +53,4 @@ fi
 
 if [ ! -d "${NOAA_HOME}/predict/" ]; then
 	mkdir -m 775 -p "${NOAA_HOME}/predict/"
-fi
-
-if [ ! -d "${NOAA_OUTPUT}/image/${FOLDER_DATE}" ]; then
-        mkdir -m 775 -p "${NOAA_OUTPUT}/image/${FOLDER_DATE}"
 fi

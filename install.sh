@@ -24,17 +24,34 @@ log_running() {
     echo " ${YELLOW}*${RESET} $1"
 }
 
+log_error() {
+    echo " ${RED}error: $1${RESET}"
+}
+
 success() {
     echo "${GREEN}$1${RESET}"
 }
 
+### Run as a normal user
+if [ $EUID -eq 0 ]; then
+    die "This script shouldn't be run as root."
+fi
+
 ### Verify cloned repo
 if [ ! -e "$HOME/raspberry-noaa" ]; then
-        die "Is https://github.com/reynico/raspberry-noaa cloned in your home directory?"
+    die "Is https://github.com/reynico/raspberry-noaa cloned in your home directory?"
 fi
 
 ### Install required packages
 log_running "Installing required packages..."
+
+raspbian_version="$(lsb_release -c --short)"
+
+if [ "$raspbian_version" == "stretch" ]; then
+    wget -q https://packages.sury.org/php/apt.gpg -O- | sudo apt-key add -
+    echo "deb https://packages.sury.org/php/ stretch main" | sudo tee /etc/apt/sources.list.d/php7.list
+fi
+
 sudo apt update -yq
 sudo apt install -yq predict \
                      python-setuptools \
@@ -54,10 +71,27 @@ sudo apt install -yq predict \
                      libxft2 \
                      libjpeg9 \
                      libjpeg9-dev \
-                     socat
+                     socat \
+                     php7.2-fpm \
+                     php7.2-sqlite \
+                     sqlite3
 
-sudo pip3 install numpy ephem tweepy Pillow
+if [ "$raspbian_version" == "stretch" ]; then
+    sudo apt install -yq libgfortran-5-dev
+else
+    sudo apt install -yq libgfortran5
+fi
+
+sudo python3 -m pip install numpy ephem tweepy Pillow
 log_done "Packages installed"
+
+### Create the database schema
+if [ -e "$HOME/raspberry-noaa/panel.db" ]; then
+    log_done "Database already created"
+else
+    sqlite3 "panel.db" < "templates/webpanel_schema.sql"
+    log_done "Database schema created"
+fi
 
 ### Blacklist DVB modules
 if [ -e /etc/modprobe.d/rtlsdr.conf ]; then
@@ -167,21 +201,21 @@ set -e
 log_running "Setting up Nginx..."
 sudo cp templates/nginx.cfg /etc/nginx/sites-enabled/default
 (
-    sudo mkdir -p /var/www/wx
-    sudo chown -R www-data:www-data /var/www/wx
+    sudo mkdir -p /var/www/wx/images
+    sudo chown -R pi:pi /var/www/wx
     sudo usermod -a -G www-data pi
     sudo chmod 775 /var/www/wx
 )
 sudo systemctl restart nginx
-if [ ! -e /var/www/wx/index.html ]; then
-    sudo cp templates/index.html /var/www/wx/index.html
-fi
-if [ ! -e /var/www/wx/logo-small.png ]; then
-    sudo cp templates/logo-small.png /var/www/wx/logo-small.png
-fi
+sudo cp -rp templates/webpanel/* /var/www/wx/
+
 log_done "Nginx configured"
 
 ### Setup ramFS
+SYSTEM_MEMORY=$(free -m | awk '/^Mem:/{print $2}')
+if [ "$SYSTEM_MEMORY" -lt 2000 ]; then
+	sed -i -e "s/1000M/200M/g" templates/fstab
+fi
 set +e
 cat /etc/fstab | grep -q "ramfs"
 if [ $? -eq 0 ]; then
@@ -195,6 +229,21 @@ sudo mount -a
 sudo chmod 777 /var/ramfs
 set -e
 
+if [ -f "$HOME/raspberry-noaa/demod.py" ]; then
+    log_done "pd120_decoder already installed"
+else
+    wget -qr https://github.com/reynico/pd120_decoder/archive/master.zip -O /tmp/master.zip
+    (
+        cd /tmp
+        unzip master.zip
+        cd pd120_decoder-master/pd120_decoder/
+        python3 -m pip install --user -r requirements.txt
+        cp demod.py utils.py "$HOME/raspberry-noaa/"
+    )
+    log_done "pd120_decoder installed"
+fi
+
+
 success "Install (almost) done!"
 
 read -rp "Do you want to enable bias-tee? (y/N)"
@@ -206,27 +255,53 @@ else
 fi
 
 echo "
+    Next we'll configure your webpanel language
+    and locale settings - you can update these in the
+    future by modifying 'lang' in /var/www/wx/Config.php
+    and 'date_default_timezone_set' in /var/www/wx/header.php
+    "
+
+# language configuration
+langs=($(find templates/webpanel/language/ -type f -printf "%f\n" | cut -f 1 -d '.'))
+while : ; do
+    read -rp "Enter your preferred language (${langs[*]}): "
+    lang=$REPLY
+
+    if [[ ! " ${langs[@]} " =~ " ${lang} " ]]; then
+        log_error "choice $lang is not one of the available options (${langs[*]})"
+    else
+        break
+    fi
+done
+sed -i -e "s/'lang' => '.*'$/'lang' => '${lang}'/" "/var/www/wx/Config.php"
+
+echo "Visit https://www.php.net/manual/en/timezones.php for a list of available timezones"
+read -rp "Enter your preferred timezone: "
+    timezone=$REPLY
+timezone=$(echo $timezone | sed 's/\//\\\//g')
+sed -i -e "s/date_default_timezone_set('.*');/date_default_timezone_set('${timezone}');/" "/var/www/wx/header.php"
+
+echo "
     It's time to configure your ground station
     You'll be asked for your latitude and longitude
     Use negative values for South and West
     "
 
 read -rp "Enter your latitude (South values are negative): "
-        lat=$REPLY
+    lat=$REPLY
 
 read -rp "Enter your longitude (West values are negative): "
-        lon=$REPLY
+    lon=$REPLY
 
-read -rp "Enter your timezone (Ex: -3 for Argentina time): "
-        timezone=$REPLY
+# note: this can probably be improved by calculating this
+# automatically - good for a future iteration
+read -rp "Enter your timezone offset (ex: -3 for Argentina time): "
+    tzoffset=$REPLY
 
 sed -i -e "s/change_latitude/${lat}/g;s/change_longitude/${lon}/g" "$HOME/.noaa.conf"
 sed -i -e "s/change_latitude/${lat}/g;s/change_longitude/${lon}/g" "$HOME/.wxtoimgrc"
 sed -i -e "s/change_latitude/${lat}/g;s/change_longitude/$(echo  "$lon * -1" | bc)/g" "$HOME/.predict/predict.qth"
-sed -i -e "s/change_latitude/${lat}/g;s/change_longitude/${lon}/g;s/change_tz/$(echo  "$timezone * -1" | bc)/g" "sun.py"
-
-# Running WXTOIMG to have the user accept the licensing agreement
-wxtoimg
+sed -i -e "s/change_latitude/${lat}/g;s/change_longitude/${lon}/g;s/change_tz/$(echo  "$tzoffset * -1" | bc)/g" "sun.py"
 
 success "Install done! Double check your $HOME/.noaa.conf settings"
 
@@ -234,3 +309,10 @@ echo "
     If you want to post your images to Twitter, please setup
     your Twitter credentials on $HOME/.tweepy.conf
 "
+
+set +e
+
+### Running WXTOIMG to have the user accept the licensing agreement
+wxtoimg
+
+sudo reboot
